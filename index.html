@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Play Center · Games</title>
+  <style>
+    :root{
+      --bg:#0e111a; --panel:#12172a; --panel2:#0f1430; --fg:#e9eef7; --muted:#8b94a7; --accent:#6ae4a6; --link:#a4c8ff; --warn:#ffc36a; --err:#ff7b7b;
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{margin:0; font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,"Helvetica Neue",Arial,sans-serif; color:var(--fg);
+      background: radial-gradient(1200px 700px at 50% -10%, #1b2040 8%, var(--bg) 60%);
+    }
+    header{max-width:1100px; margin:24px auto 12px; padding:0 16px; display:flex; align-items:center; gap:12px; flex-wrap:wrap}
+    h1{font-size:clamp(20px,3vw,28px); margin:0}
+    .org{color:var(--muted); font-weight:600}
+    .controls{margin-left:auto; display:flex; gap:8px; flex-wrap:wrap}
+    input,select,button{background:transparent; color:var(--fg); border:1px solid #2f365a; border-radius:10px; padding:8px 10px}
+    input::placeholder{color:#96a0b8}
+    button{cursor:pointer; font-weight:700}
+    button:hover{border-color:var(--accent); color:var(--accent)}
+
+    .wrap{max-width:1100px; margin:0 auto; padding:0 16px 40px}
+    .grid{display:grid; grid-template-columns:repeat(auto-fill, minmax(220px,1fr)); gap:14px}
+
+    .card{background:linear-gradient(180deg, var(--panel), var(--panel2)); border:1px solid #253058; border-radius:16px; padding:14px; display:flex; flex-direction:column; gap:10px; position:relative; overflow:hidden}
+    .title{font-weight:800; letter-spacing:.2px}
+    .desc{color:var(--muted); font-size:13px}
+    .tags{display:flex; gap:6px; flex-wrap:wrap}
+    .tag{font-size:11px; padding:4px 7px; border:1px solid #2c3458; border-radius:999px; color:#cfe6ff}
+    .badges{position:absolute; right:10px; top:10px; display:flex; gap:6px}
+    .badge{font-size:11px; padding:4px 7px; border-radius:8px; border:1px solid #2c3458; background:#0b1026aa}
+    .ok{border-color:#295e3d; color:#bff7d5}
+    .warn{border-color:#6a4b1e; color:#ffe3b7}
+    .err{border-color:#6a2b2b; color:#ffc1c1}
+
+    .actions{display:flex; gap:8px; margin-top:auto}
+    .button{flex:1; text-align:center; text-decoration:none; font-weight:800; border:1px solid #2f365a; padding:9px 10px; border-radius:12px}
+    .button:hover{border-color:var(--link); color:var(--link)}
+    .primary{border-color:#2f6a54}
+    .primary:hover{border-color:var(--accent); color:var(--accent)}
+
+    .footer{max-width:1100px; margin:18px auto 50px; padding:0 16px; color:var(--muted); font-size:13px}
+    .kbd{display:inline-block; border:1px solid #3a4163; border-bottom-width:3px; padding:2px 6px; border-radius:6px; font-weight:700; color:#cdd5e7}
+
+    .empty{opacity:.8; text-align:center; padding:28px; border:1px dashed #2d355e; border-radius:16px}
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Game Hub</h1>
+    <div class="org" id="orgLabel">@play-center</div>
+    <div class="controls">
+      <input id="search" placeholder="Search repos… (e.g. pong)" />
+      <select id="sort">
+        <option value="alpha">A → Z</option>
+        <option value="updated">Recently updated</option>
+        <option value="created">Newest first</option>
+        <option value="pushed">Recently pushed</option>
+      </select>
+      <label style="display:flex;align-items:center;gap:6px;font-size:14px"><input type="checkbox" id="onlyPages" checked /> Only repos with Pages</label>
+      <button id="refresh">Refresh</button>
+    </div>
+  </header>
+
+  <div class="wrap">
+    <div id="grid" class="grid" aria-live="polite"></div>
+    <div id="empty" class="empty" style="display:none">No repos match your search.</div>
+  </div>
+
+  <div class="footer">
+    Tip: This hub auto-loads public repos from the org. Put this file at the repo root as <span class="kbd">index.html</span> to make it your landing page. Your existing game page (like Pong) can live at <span class="kbd">/pong/</span>.
+  </div>
+
+<script>
+(async function(){
+  const params = new URLSearchParams(location.search);
+  const ORG = params.get('org') || 'play-center';
+  document.getElementById('orgLabel').textContent = '@' + ORG;
+
+  const EXCLUDE = new Set(['.github']);
+  const PREFERRED_ORDER = ['pong']; // put key repos first
+
+  const grid = document.getElementById('grid');
+  const empty = document.getElementById('empty');
+  const search = document.getElementById('search');
+  const sortSel = document.getElementById('sort');
+  const refreshBtn = document.getElementById('refresh');
+  const onlyPages = document.getElementById('onlyPages');
+
+  refreshBtn.addEventListener('click', load);
+  search.addEventListener('input', render);
+  sortSel.addEventListener('change', render);
+  onlyPages.addEventListener('change', render);
+
+  let repos = [];
+
+  async function fetchAllRepos(){
+    let page = 1; const per_page = 100; let out = [];
+    while(true){
+      const url = `https://api.github.com/orgs/${ORG}/repos?type=public&per_page=${per_page}&page=${page}`;
+      const res = await fetch(url, {headers:{'Accept':'application/vnd.github+json'}});
+      if(!res.ok) throw new Error('GitHub API error: ' + res.status);
+      const chunk = await res.json();
+      out = out.concat(chunk);
+      if(chunk.length < per_page) break; page++;
+    }
+    return out.filter(r=> !EXCLUDE.has(r.name));
+  }
+
+  function repoToCard(r){
+    const pagesUrl = `https://${ORG}.github.io/${r.name}/`;
+    const repoUrl = r.html_url;
+
+    const card = document.createElement('div');
+    card.className = 'card';
+
+    const badges = document.createElement('div');
+    badges.className = 'badges';
+    const visibility = document.createElement('div');
+    visibility.className = 'badge';
+    visibility.textContent = r.private ? 'private' : 'public';
+    badges.appendChild(visibility);
+
+    const updated = document.createElement('div');
+    updated.className = 'badge';
+    updated.textContent = 'updated ' + timeAgo(r.updated_at);
+    badges.appendChild(updated);
+
+    card.appendChild(badges);
+
+    const title = document.createElement('div');
+    title.className = 'title';
+    title.textContent = niceName(r.name);
+    card.appendChild(title);
+
+    const desc = document.createElement('div');
+    desc.className = 'desc';
+    desc.textContent = r.description || 'No description provided.';
+    card.appendChild(desc);
+
+    const tags = document.createElement('div');
+    tags.className = 'tags';
+    if(r.language){
+      const t = document.createElement('span'); t.className='tag'; t.textContent=r.language; tags.appendChild(t);
+    }
+    if(r.topics && r.topics.length){
+      r.topics.slice(0,3).forEach(tp=>{ const t=document.createElement('span'); t.className='tag'; t.textContent=tp; tags.appendChild(t); });
+    }
+    card.appendChild(tags);
+
+    const actions = document.createElement('div');
+    actions.className = 'actions';
+
+    const play = document.createElement('a');
+    play.className = 'button primary';
+    play.href = pagesUrl; play.target = '_blank'; play.rel='noopener';
+    play.textContent = '▶ Play';
+
+    const code = document.createElement('a');
+    code.className = 'button';
+    code.href = repoUrl; code.target = '_blank'; code.rel='noopener';
+    code.textContent = 'Code';
+
+    actions.appendChild(play); actions.appendChild(code);
+    card.appendChild(actions);
+
+    // Optional: probe if Pages is live (best-effort; ignore CORS failures)
+    probePages(pagesUrl).then(status => {
+      const s = document.createElement('div'); s.className = 'badge ' + (status==='ok'?'ok': status==='maybe'?'warn':'err');
+      s.textContent = status==='ok' ? 'pages: live' : status==='maybe' ? 'pages: unknown' : 'pages: not found';
+      badges.appendChild(s);
+    }).catch(()=>{});
+
+    return card;
+  }
+
+  async function probePages(url){
+    try{
+      const res = await fetch(url, {method:'GET', redirect:'follow'});
+      if(res.ok) return 'ok';
+      return 'err';
+    }catch(e){
+      // CORS/network opaque — we just can’t tell
+      return 'maybe';
+    }
+  }
+
+  function niceName(name){
+    return name.replace(/[-_]/g,' ').replace(/\b\w/g, c=>c.toUpperCase());
+  }
+
+  function timeAgo(iso){
+    const now = new Date(); const then = new Date(iso);
+    const s = Math.floor((now-then)/1000);
+    const units = [[31536000,'y'],[2592000,'mo'],[604800,'w'],[86400,'d'],[3600,'h'],[60,'m']];
+    for(const [secs,label] of units){ if(s>=secs) return Math.floor(s/secs)+label; }
+    return s + 's';
+  }
+
+  function render(){
+    const q = search.value.trim().toLowerCase();
+    const sort = sortSel.value;
+
+    let list = repos.filter(r => !r.fork && !r.archived && (!onlyPages.checked || r.has_pages));
+    if(q){ list = list.filter(r => r.name.toLowerCase().includes(q) || (r.description||'').toLowerCase().includes(q)); }
+
+    list.sort((a,b)=>{
+      if(sort==='alpha') return a.name.localeCompare(b.name);
+      if(sort==='created') return new Date(b.created_at)-new Date(a.created_at);
+      if(sort==='updated') return new Date(b.updated_at)-new Date(a.updated_at);
+      if(sort==='pushed') return new Date(b.pushed_at)-new Date(a.pushed_at);
+      return 0;
+    });
+
+    // Move preferred repos to the front in declared order
+    PREFERRED_ORDER.slice().reverse().forEach(key=>{
+      const i = list.findIndex(r=> r.name.toLowerCase()===key.toLowerCase());
+      if(i>0){ const [it] = list.splice(i,1); list.unshift(it); }
+    });
+
+    grid.innerHTML = '';
+    if(!list.length){ empty.style.display='block'; return; }
+    empty.style.display='none';
+    list.forEach(r => grid.appendChild(repoToCard(r)));
+  }
+
+  async function load(){
+    grid.innerHTML = '';
+    const loader = document.createElement('div'); loader.className='empty'; loader.textContent='Loading repos…';
+    grid.appendChild(loader);
+    try{
+      const res = await fetchAllRepos();
+      repos = res;
+      render();
+    }catch(e){
+      grid.innerHTML = '';
+      const err = document.createElement('div'); err.className='empty'; err.textContent = 'Failed to load from GitHub API. Try again later.';
+      grid.appendChild(err);
+      console.error(e);
+    }
+  }
+
+  load();
+})();
+</script>
+</body>
+</html>
