@@ -6,7 +6,7 @@
   <title>Play Center · Games</title>
   <style>
     :root{
-      --bg:#0e111a; --panel:#12172a; --panel2:#0f1430; --fg:#e9eef7; --muted:#8b94a7; --accent:#6ae4a6; --link:#a4c8ff; --warn:#ffc36a; --err:#ff7b7b;
+      --bg:#0e111a; --panel:#12172a; --panel2:#0f1430; --fg:#e9eef7; --muted:#8b94a7; --accent:#6ae4a6; --link:#a4c8ff;
     }
     *{box-sizing:border-box}
     html,body{height:100%}
@@ -16,28 +16,28 @@
     header{max-width:1100px; margin:24px auto 12px; padding:0 16px; display:flex; align-items:center; gap:12px; flex-wrap:wrap}
     h1{font-size:clamp(20px,3vw,28px); margin:0}
     .org{color:var(--muted); font-weight:600}
-    .controls{margin-left:auto; display:flex; gap:8px; flex-wrap:wrap}
+    .controls{margin-left:auto; display:flex; gap:8px; flex-wrap:wrap; align-items:center}
     input,select,button{background:transparent; color:var(--fg); border:1px solid #2f365a; border-radius:10px; padding:8px 10px}
     input::placeholder{color:#96a0b8}
     button{cursor:pointer; font-weight:700}
     button:hover{border-color:var(--accent); color:var(--accent)}
 
     .wrap{max-width:1100px; margin:0 auto; padding:0 16px 40px}
-    .grid{display:grid; grid-template-columns:repeat(auto-fill, minmax(220px,1fr)); gap:14px}
+    .grid{display:grid; grid-template-columns:repeat(auto-fill, minmax(260px,1fr)); gap:18px}
 
-    .card{background:linear-gradient(180deg, var(--panel), var(--panel2)); border:1px solid #253058; border-radius:16px; padding:14px; display:flex; flex-direction:column; gap:10px; position:relative; overflow:hidden}
-    .title{font-weight:800; letter-spacing:.2px}
-    .desc{color:var(--muted); font-size:13px}
+    .card{background:linear-gradient(180deg, var(--panel), var(--panel2)); border:1px solid #253058; border-radius:16px; padding:14px; display:flex; flex-direction:column; gap:10px; position:relative; overflow:hidden; min-height:180px}
+    .title{font-weight:800; letter-spacing:.2px; margin-right:70px}
+    .desc{color:var(--muted); font-size:13px; line-height:1.3}
     .tags{display:flex; gap:6px; flex-wrap:wrap}
     .tag{font-size:11px; padding:4px 7px; border:1px solid #2c3458; border-radius:999px; color:#cfe6ff}
-    .badges{position:absolute; right:10px; top:10px; display:flex; gap:6px}
-    .badge{font-size:11px; padding:4px 7px; border-radius:8px; border:1px solid #2c3458; background:#0b1026aa}
+    .badges{position:absolute; right:10px; top:10px; display:flex; flex-direction:column; gap:4px; align-items:flex-end}
+    .badge{font-size:11px; padding:2px 6px; border-radius:6px; border:1px solid #2c3458; background:#0b1026aa; white-space:nowrap}
     .ok{border-color:#295e3d; color:#bff7d5}
     .warn{border-color:#6a4b1e; color:#ffe3b7}
     .err{border-color:#6a2b2b; color:#ffc1c1}
 
-    .actions{display:flex; gap:8px; margin-top:auto}
-    .button{flex:1; text-align:center; text-decoration:none; font-weight:800; border:1px solid #2f365a; padding:9px 10px; border-radius:12px}
+    .actions{display:flex; gap:8px; margin-top:auto; flex-wrap:wrap}
+    .button{flex:1; text-align:center; text-decoration:none; font-weight:800; border:1px solid #2f365a; padding:9px 10px; border-radius:12px; transition:all .2s}
     .button:hover{border-color:var(--link); color:var(--link)}
     .primary{border-color:#2f6a54}
     .primary:hover{border-color:var(--accent); color:var(--accent)}
@@ -60,7 +60,7 @@
         <option value="created">Newest first</option>
         <option value="pushed">Recently pushed</option>
       </select>
-      <label style="display:flex;align-items:center;gap:6px;font-size:14px"><input type="checkbox" id="onlyPages" checked /> Only repos with Pages</label>
+      <label style="font-size:14px"><input type="checkbox" id="onlyPages" checked /> Only Pages</label>
       <button id="refresh">Refresh</button>
     </div>
   </header>
@@ -76,12 +76,11 @@
 
 <script>
 (async function(){
-  const params = new URLSearchParams(location.search);
-  const ORG = params.get('org') || 'play-center';
+  const ORG = 'play-center';
   document.getElementById('orgLabel').textContent = '@' + ORG;
 
   const EXCLUDE = new Set(['.github']);
-  const PREFERRED_ORDER = ['pong']; // put key repos first
+  const PREFERRED_ORDER = ['pong'];
 
   const grid = document.getElementById('grid');
   const empty = document.getElementById('empty');
@@ -119,6 +118,7 @@
 
     const badges = document.createElement('div');
     badges.className = 'badges';
+
     const visibility = document.createElement('div');
     visibility.className = 'badge';
     visibility.textContent = r.private ? 'private' : 'public';
@@ -167,25 +167,13 @@
     actions.appendChild(play); actions.appendChild(code);
     card.appendChild(actions);
 
-    // Optional: probe if Pages is live (best-effort; ignore CORS failures)
-    probePages(pagesUrl).then(status => {
-      const s = document.createElement('div'); s.className = 'badge ' + (status==='ok'?'ok': status==='maybe'?'warn':'err');
-      s.textContent = status==='ok' ? 'pages: live' : status==='maybe' ? 'pages: unknown' : 'pages: not found';
+    if(r.has_pages){
+      const s = document.createElement('div'); s.className = 'badge ok';
+      s.textContent = 'pages: live';
       badges.appendChild(s);
-    }).catch(()=>{});
+    }
 
     return card;
-  }
-
-  async function probePages(url){
-    try{
-      const res = await fetch(url, {method:'GET', redirect:'follow'});
-      if(res.ok) return 'ok';
-      return 'err';
-    }catch(e){
-      // CORS/network opaque — we just can’t tell
-      return 'maybe';
-    }
   }
 
   function niceName(name){
@@ -215,7 +203,6 @@
       return 0;
     });
 
-    // Move preferred repos to the front in declared order
     PREFERRED_ORDER.slice().reverse().forEach(key=>{
       const i = list.findIndex(r=> r.name.toLowerCase()===key.toLowerCase());
       if(i>0){ const [it] = list.splice(i,1); list.unshift(it); }
